@@ -1,0 +1,489 @@
+---
+title: "Visualization"
+author: "Rita Li"
+date: "4/27/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(ggpubr)
+
+require(grid)
+crime <- read_csv("Crime_Incident_Report.csv")
+
+saintpaul <- readr::read_csv("2019_neighborhood_new.csv")
+
+temperature <- read_csv("2019 St.Paul Monthly Temp.csv")
+
+```
+
+
+
+## Cleaning dataset
+
+```{r}
+crimedataset <- crime %>% 
+  filter(year(DATE) == 2019)
+
+crimedataset <- crimedataset %>% 
+  mutate(incident_cat = ifelse(str_detect(INCIDENT, "Theft")|INCIDENT %in% c("Burglary") , "Theft",INCIDENT)) %>% 
+  mutate(incident_cat = ifelse(str_detect(INCIDENT, "Assault")|INCIDENT %in% c("Arson","Rape","Homicide","Simple Asasult Dom.", "Criminal Damage", "Robbery"), "Violence",incident_cat)) %>% 
+  # other: no people hurt
+  mutate(incident_cat = ifelse(INCIDENT %in% c("Graffiti" ,"Vandalism"), "Property Damage", incident_cat)) %>%
+  mutate(incident_cat = ifelse(INCIDENT %in% c("Narcotics","Discharge"), "Other", incident_cat)) %>% 
+  mutate(incident_cat = ifelse(INCIDENT %in% c("Community Engagement Event", "Proactive Police Visit"), "Police Presences", incident_cat))
+
+crimedataset <- crimedataset %>%
+  mutate(month = month(DATE)) %>% 
+  group_by(NEIGHBORHOOD_NUMBER, month,incident_cat) %>% 
+  summarise(inc_count = n(),NEIGHBORHOOD_NUMBER,incident_cat) %>% 
+  distinct() %>% 
+  left_join(saintpaul, by = c("NEIGHBORHOOD_NUMBER" = "Neighorhood_Code")) %>% 
+  mutate(count_per_10000_people = inc_count/`Total population`*10000) %>% 
+  mutate(Neighborhood = ifelse(Neighborhood == "Como (St. Paul)", "Como Park",Neighborhood),
+         Neighborhood = ifelse(Neighborhood == "Frogtown/Thomas-Dale", "Frogtown",Neighborhood),
+         Neighborhood = ifelse(Neighborhood == "St. Anthony Park", "St. Anthony",Neighborhood),
+         Neighborhood = ifelse(Neighborhood == "Battle Creek-Highwood", "Southeast",Neighborhood))
+
+
+```
+
+
+```{r}
+theftdata <- crimedataset %>% 
+  filter(incident_cat == "Theft") %>% 
+  pivot_longer(cols= `Male - Share` :`Poverty 65 years and older - Share`,names_to = "variables", values_to = "values") %>% 
+  mutate(values = as.numeric(str_remove(values, "%"))) %>% 
+  pivot_wider(names_from = variables, values_from = values) %>% 
+  mutate(label = ifelse(Neighborhood == "Downtown", "Downtown"," "),
+         label = ifelse(Neighborhood == "Union Park", "Union Park", label))
+
+violencedata <- crimedataset %>% 
+  filter(incident_cat == "Violence") %>% 
+  pivot_longer(cols= `Male - Share` :`Poverty 65 years and older - Share`,names_to = "variables", values_to = "values") %>% 
+  mutate(values = as.numeric(str_remove(values, "%"))) %>% 
+  pivot_wider(names_from = variables, values_from = values) %>% 
+  mutate(label = ifelse(Neighborhood == "Downtown", "Downtown"," "))
+
+```
+
+
+```{r}
+map <- geojson_sf("TwinCities Final.json",expand_geometries = TRUE) %>% 
+  mutate(name2 = ifelse(name2 == "Frogtown/Thomas-Dale", "Frogtown",name2),
+         name2 = ifelse(name2 == "Highland Park", "Highland",name2),
+         name2 = ifelse(name2 == "St Anthony Park", "St. Anthony",name2),
+         name2 = ifelse(name2 == "West 7th - Fort Road", "West Seventh",name2))
+  
+highway <- geojson_sf("highway.json",expand_geometries = TRUE)
+```
+
+
+## Violence data
+```{r,fig.width=8,fig.height=4,warning=FALSE, fig.alt = "This is a choropleth map colored by the violence crime count per capita in Saint Paul neighborhoods."}
+violence <- violencedata %>% 
+  group_by(Neighborhood) %>% 
+  summarise(year_count_per10000 = sum(count_per_10000_people), `Unemployment rate - Share`, .groups = "drop") %>%
+  distinct() %>% 
+  left_join(map, by = c("Neighborhood"="name2")) 
+
+write.csv2(violence, file = "Map.csv")
+
+violence %>% 
+  ggplot()+
+  geom_sf(aes(geometry = geometry,fill = year_count_per10000)) +
+  geom_sf_text(aes(geometry = geometry, label = Neighborhood), size = 3, color = 'black')+
+  scale_fill_gradient(high = "red", low = "white") +
+  labs(title = "2019 Reported Violence Crime Count per capita in St.Paul Neighborhoods",
+       fill = "Crimes Counts per 10000 people") +
+  theme_void()+
+  theme(plot.title = element_text(size = 15,hjust = 0.5,color = "#414141"),
+        legend.title = element_text(size = 15,hjust = 0.7,color = "#414141"),
+        legend.position = "bottom",
+        legend.justification = c(0.5,0.8))
+```
+
+```{r}
+violencedata %>%
+  ggplot(aes(x = month, y = count_per_10000_people, color = Neighborhood))+
+  geom_line()+
+  labs(title = "Violence Crime In St.Paul Neighborhoods throughout 2019") +
+  theme_classic()+
+  theme(plot.title = element_text(size = 13,hjust = 0.7,color = "#414141"))
+
+
+
+plot_UE <- violencedata %>% 
+  mutate(ue_percentage = `Unemployment rate - Share`) %>% 
+  group_by(Neighborhood) %>% 
+  summarise(total_count = sum(count_per_10000_people), ue_percentage,label) %>% 
+  distinct() %>% 
+  ggplot(aes(x = ue_percentage/100, y = total_count))+
+  geom_text(aes(label = label), size = 2.5, vjust = 2,check_overlap = TRUE)+
+  labs(title = "Unemployment rate",  x = "",y = "") +
+  geom_point(color = "#414141")+
+  geom_smooth(method = 'lm',se = FALSE) +
+  scale_x_continuous(labels = scales::percent)+
+  theme_classic()+
+  theme(plot.title = element_text(size = 12,hjust = 0.5,color = "#414141"))
+
+
+plot_income <- violencedata %>% 
+  mutate(Median_household_income = `Median household income (2008-2012, 2012 dollars)`) %>%
+  group_by(Neighborhood) %>% 
+  summarise(total_count = sum(count_per_10000_people), Median_household_income,label) %>% 
+  distinct() %>% 
+  ggplot(aes(x = Median_household_income, y = total_count))+
+  geom_text(aes(label = label), size = 2.5, vjust = 2,check_overlap = TRUE)+
+  labs(title = "Median household income",  x = "",y = "") +
+  geom_point(color = "#414141")+
+  geom_smooth(method = 'lm',se = FALSE) +
+  theme_classic()+
+  theme(plot.title = element_text(size = 12,hjust = 0.5,color = "#414141"))
+
+plot_poverty <- violencedata %>% 
+  group_by(Neighborhood) %>% 
+  summarise(total_count = sum(count_per_10000_people), `Poverty 17 years and younger - Share`,label) %>% 
+  distinct() %>% 
+  ggplot(aes(x = `Poverty 17 years and younger - Share`/100, y = total_count))+
+  geom_text(aes(label = label), size = 2.5, vjust = 2,check_overlap = TRUE)+
+  labs(title = "Poverty rate of 17 years and younger",  x = "",y = "") +
+  geom_point(color = "#414141")+
+  geom_smooth(method = 'lm',se = FALSE) +
+  scale_x_continuous(labels = scales::percent)+
+  theme_classic()+
+  theme(plot.title = element_text(size = 10,hjust = 0.5,color = "#414141"))
+
+plot_BA <- violencedata %>% 
+  mutate(BA_percentage = `Bachelor's degree or higher - Share`) %>% 
+  group_by(Neighborhood) %>% 
+  summarise(total_count = sum(count_per_10000_people), BA_percentage,label) %>% 
+  distinct() %>% 
+  ggplot(aes(x = BA_percentage/100, y = total_count))+
+  geom_text(aes(label = label), size = 2.5, vjust = 2,check_overlap = TRUE)+
+  labs(title = "Percentage of Bachelor's degree or higher", x = "", y = "") +
+  geom_point(color = "#414141")+
+  geom_smooth(method = 'lm',se = FALSE) +
+  scale_x_continuous(labels = scales::percent)+
+  theme_classic()+
+  theme(plot.title = element_text(size = 10,hjust = 0.7,color = "#414141"))
+
+
+econ_plot <- ggarrange(ggarrange(plot_poverty, plot_UE, plot_income, plot_BA,
+          ncol = 2, nrow = 2))
+
+annotate_figure(econ_plot, left = textGrob("Crime Count per 10000 people", rot = 90, vjust = 1, gp = gpar(cex = 1)))
+```
+
+```{r}
+plot_Black <- violencedata %>% 
+  mutate(black_percentage = `Black or African American - Share`,
+         black = ifelse(black_percentage <= 10, "Less than 10%", NA),
+         black = ifelse(black_percentage >10 & black_percentage <= 20, "Between 10% & 20%",black),
+         black = ifelse(black_percentage > 20, "More than 20%", black)) %>%
+  group_by(Neighborhood) %>% 
+  summarise(total_count = sum(count_per_10000_people), black_percentage, black,label) %>% 
+  distinct() %>% 
+  ggplot(aes(x = black_percentage/100, y = total_count, color = black))+
+  labs(title = "Black", x = "", y = "") +
+  geom_boxplot(varwidth = TRUE,outlier.alpha = 0)+
+  geom_point(size = 1.2)+
+  geom_text(aes(label = label), size = 2.5, vjust = 0.3, hjust = 1.1, check_overlap = TRUE)+
+  scale_x_continuous(labels = scales::percent)+
+  #geom_smooth(method = 'lm') +
+  theme_classic()+
+  theme(plot.title = element_text(size = 11,hjust = 0.5,color = "#414141"),
+        legend.position = "none")
+
+plot_Asian <- violencedata %>% 
+  mutate(Asian_percentage = as.numeric(str_remove(`Asian or Pacific Islander - Share`, "%"))) %>%
+  mutate(asian_more_than_25 = factor(if_else(Asian_percentage > 25, "Yes",'No'))) %>%
+  group_by(Neighborhood) %>% 
+  summarise(total_count = sum(count_per_10000_people), Asian_percentage, asian_more_than_25,label) %>% 
+  distinct() %>% 
+  ggplot(aes(x = Asian_percentage/100, y = total_count, color = asian_more_than_25))+
+  labs(title = "Asian", x = "", y = "") +
+  geom_boxplot(varwidth = TRUE,outlier.alpha = 0)+
+  geom_point(size = 1.2)+
+  geom_text(aes(label = label), size = 2.5, vjust = 0.3, hjust = 1.1, check_overlap = TRUE)+
+  scale_x_continuous(labels = scales::percent)+
+  theme_classic()+
+  theme(plot.title = element_text(size = 11,hjust = 0.5,color = "#414141"),
+        legend.position = "none")
+
+plot_White <- violencedata %>% 
+  mutate(white_percentage = `White - Share`) %>%
+  mutate(white_more_70 = factor(if_else(white_percentage > 70, "Yes",'No'))) %>%
+  group_by(Neighborhood) %>% 
+  summarise(total_count = sum(count_per_10000_people), white_percentage, white_more_70,label) %>% 
+  distinct() %>% 
+  ggplot(aes(x = white_percentage, y = total_count, color = white_more_70))+
+  geom_boxplot(varwidth = TRUE,outlier.alpha = 0)+
+  geom_point()+
+  geom_text(aes(label = label), size = 2.5, vjust = 0.3, hjust = 1.1, check_overlap = TRUE)+
+  labs(title = "White Percentage", x = "", y = "") +
+  scale_color_manual(values = c("orange","#5F9659"))+
+  theme_classic()+
+  theme(plot.title = element_text(size = 10,hjust = 0.5,color = "#414141"),
+        legend.position = "none")
+
+plot_native <- violencedata %>% 
+  mutate(Native_percentage = as.numeric(str_remove(`American Indian and Alaska Native - Share`, "%"))) %>%
+  group_by(Neighborhood) %>% 
+  summarise(total_count = sum(count_per_10000_people), Native_percentage,label) %>% 
+  distinct() %>% 
+  ggplot(aes(x = Native_percentage/100, y = total_count))+
+  geom_text(aes(label = label), size = 2.5, vjust = 2,check_overlap = TRUE)+
+  labs(title = "Native", x = "", y = "") +
+  geom_point(size = 1)+
+  geom_smooth(method = 'lm',size = 0.6,se = FALSE) +
+  scale_x_continuous(labels = scales::percent)+
+  theme_classic()+
+  theme(plot.title = element_text(size = 11,hjust = 0.5,color = "#414141"))
+
+
+
+plot_Latino <- violencedata %>% 
+  mutate(Latino_percentage = as.numeric(str_remove(`Hispanic or Latino - Share`, "%"))) %>%
+  group_by(Neighborhood) %>% 
+  summarise(total_count = sum(count_per_10000_people), Latino_percentage,label) %>% 
+  distinct() %>% 
+  ggplot(aes(x = Latino_percentage/100, y = total_count))+
+  geom_text(aes(label = label), size = 2.5, vjust = 0.1, hjust = -0.07, check_overlap = TRUE)+
+  labs(title = "Latino", x = "", y = "") +
+  geom_point(size = 1)+
+  geom_smooth(method = 'lm',size = 0.6,se = FALSE) +
+  scale_x_continuous(labels = scales::percent)+
+  theme_classic()+
+  theme(plot.title = element_text(size = 11,hjust = 0.5,color = "#414141"))
+
+race_plot <- ggarrange(ggarrange(plot_native, plot_White, plot_Latino,
+          ncol = 3, nrow = 1),
+          ggarrange(plot_Asian,plot_Black,ncol = 2, nrow = 1),
+          ncol = 1, nrow =2)
+
+annotate_figure(race_plot, left = textGrob("Crime Count per 10000 people", rot = 90, vjust = 1, gp = gpar(cex = 1)))
+
+```
+
+
+
+## Theft data
+```{r,fig.width=8,fig.height=4,warning=FALSE, fig.alt = "This is a choropleth map colored by the theft crime count per capita in Saint Paul neighborhoods."}
+theftdata %>% 
+  group_by(Neighborhood) %>% 
+  summarise(year_count_per10000 = sum(count_per_10000_people), `Unemployment rate - Share`, .groups = "drop") %>%
+  distinct() %>% 
+  left_join(map, by = c("Neighborhood"="name2")) %>% 
+  ggplot()+
+  geom_sf(aes(geometry = geometry,fill = year_count_per10000)) +
+  geom_sf_text(aes(geometry = geometry, label = Neighborhood), size = 3, color = 'black')+
+  scale_fill_gradient(high = "#184f98", low = "white") +
+  labs(title = "2019 Reported Theft Crime Count per capita in St.Paul Neighborhoods",
+       fill = "Crime Counts per 10000 people") +
+  theme_void()+
+  theme(plot.title = element_text(size = 15,hjust = 0.5,color = "#414141"),
+        legend.title = element_text(size = 15,hjust = 0.7,color = "#414141"),
+        legend.position = "bottom",
+        legend.justification = c(0.5,0.8))
+```
+
+
+```{r}
+theftdata %>% 
+  ggplot(aes(x = month, y = log(count_per_10000_people), color = Neighborhood))+
+  geom_line()+
+  labs(title = "Theft Crime In St.Paul Neighborhoods throughout 2019") +
+  theme_classic()
+```
+
+
+```{r}
+theft_BA <- theftdata %>% 
+  mutate(BA_percentage = `Bachelor's degree or higher - Share`,
+         Bachelor = ifelse(BA_percentage <= 40, "Less than 40%", NA),
+         Bachelor = ifelse(BA_percentage >40 & BA_percentage <= 60, "Between 40% & 60%",Bachelor),
+         Bachelor = ifelse(BA_percentage > 60, "More than 60%", Bachelor)) %>% 
+  group_by(Neighborhood) %>% 
+  summarise(total_count = sum(count_per_10000_people), BA_percentage, Bachelor,label) %>% 
+  distinct() %>% 
+  ungroup() %>% 
+  ggplot(aes(x = BA_percentage, y = total_count, color = Bachelor))+
+  geom_boxplot(varwidth = TRUE,outlier.alpha = 0)+
+  geom_point()+
+  geom_text(aes(label = label), size = 2.5, vjust = 0.3, hjust = 1.1, check_overlap = TRUE)+
+  scale_color_brewer(palette = "Set1")+
+  labs(title = "% of Bachelor's degree or higher", x = "", y = "") +
+  theme_classic()+
+  theme(plot.title = element_text(size = 10,hjust = 0.5,color = "#414141"),
+        legend.position = "none")
+
+theft_UE <- theftdata %>% 
+  mutate(ue_percentage = `Unemployment rate - Share`) %>% 
+  mutate(unemployment = ifelse(ue_percentage < 4, "Less than 4%","Between 4% and 6%"),
+         unemployment = ifelse(ue_percentage > 6, "More than 6%",unemployment)) %>%
+  group_by(Neighborhood) %>% 
+  summarise(total_count = sum(count_per_10000_people), ue_percentage, unemployment,label) %>% 
+  distinct() %>% 
+  ggplot(aes(x = ue_percentage, y = total_count, color = unemployment))+
+  geom_boxplot(varwidth = TRUE,outlier.alpha = 0)+
+  geom_point()+
+  geom_text(aes(label = label), size = 2.5, vjust = 0.3, hjust = 1.1, check_overlap = TRUE)+
+  scale_color_brewer(palette = "Set1")+
+  labs(title = "Unemployment rate", x = "", y = "") +
+  geom_point()+
+  #geom_smooth(method = 'lm') +
+  theme_classic()+
+  theme(plot.title = element_text(size = 12,hjust = 0.5,color = "#414141"),
+        legend.position = "none")
+
+
+
+theft_native <- theftdata %>% 
+  mutate(Native_percentage = as.numeric(str_remove(`American Indian and Alaska Native - Share`, "%"))) %>%
+  mutate(native = ifelse(Native_percentage > 0.8, "More than 80%","Between 40% and 80%"),
+         native = ifelse(Native_percentage < 0.45, "Less than 45%",native)) %>%
+  group_by(Neighborhood) %>% 
+  summarise(total_count = sum(count_per_10000_people), Native_percentage, native,label) %>% 
+  distinct() %>% 
+  ggplot(aes(x = Native_percentage, y = total_count, color = native))+
+  geom_boxplot(varwidth = TRUE,outlier.alpha = 0)+
+  labs(title = "Native percentage",x = "", y = "") +
+  geom_point()+
+  geom_text(aes(label = label), size = 2.5, vjust = 0.3, hjust = 1.1, check_overlap = TRUE)+
+  scale_color_brewer(palette = "Set1")+
+  theme_classic()+
+  theme(plot.title = element_text(size = 12,hjust = 0.5,color = "#414141"),
+        legend.position = "none")
+```
+
+```{r,fig.width=4.5,fig.height=1.5}
+triples <- ggarrange(theft_BA,theft_UE,theft_native,nrow = 1)
+
+annotate_figure(triples, left = textGrob("Crime Count per 10000 people", rot = 90, vjust = 1, gp = gpar(cex = 0.8)))
+```
+
+
+```{r}
+theft_White <- theftdata %>% 
+  mutate(white_percentage = `White - Share`) %>%
+  mutate(white_more_60 = factor(if_else(white_percentage > 60, "Yes",'No'))) %>%
+  group_by(Neighborhood) %>% 
+  summarise(total_count = sum(count_per_10000_people), white_percentage, white_more_60,label) %>% 
+  distinct() %>% 
+  ggplot(aes(x = white_percentage, y = total_count, color = white_more_60))+
+  geom_boxplot(varwidth = TRUE,outlier.alpha = 0)+
+  geom_point()+
+  geom_text(aes(label = label), size = 2.5, vjust = 0.3, hjust = 1.1, check_overlap = TRUE)+
+  labs(title = "White Percentage", x = "", y = "") +
+  scale_color_manual(values = c("orange","#5F9659"))+
+  theme_classic()+
+  theme(plot.title = element_text(size = 10,hjust = 0.5,color = "#414141"),
+        legend.position = "none")
+
+theft_Black <- theftdata %>% 
+  mutate(black_percentage = as.numeric(str_remove(`Black or African American - Share`, "%"))) %>%
+  mutate(black_more_than_20 = factor(if_else(black_percentage > 20, "Yes",'No'))) %>%
+  group_by(Neighborhood) %>% 
+  summarise(total_count = sum(count_per_10000_people), black_more_than_20, black_percentage,label) %>% 
+  distinct() %>% 
+  ggplot(aes(x = black_percentage, y = total_count, color = black_more_than_20))+
+  geom_boxplot(varwidth = TRUE,outlier.alpha = 0)+
+  geom_point()+
+  labs(title = "Black percentage",x = "", y = "") +
+  geom_point()+
+  geom_text(aes(label = label), size = 2.5, vjust = 0.3, hjust = -0.1, check_overlap = TRUE)+
+  scale_color_manual(values = c("#5F9659","orange"))+
+  theme_classic()+
+  theme(plot.title = element_text(size = 10,hjust = 0.5,color = "#414141"),
+        legend.position = "none")
+
+theft_asian <- theftdata %>% 
+  mutate(Asian_percentage = as.numeric(str_remove(`Asian or Pacific Islander - Share`, "%"))) %>%
+  mutate(asian_more_than_20 = factor(if_else(Asian_percentage > 20, "Yes",'No'))) %>%
+  group_by(Neighborhood) %>% 
+  summarise(total_count = sum(count_per_10000_people), Asian_percentage, asian_more_than_20,label) %>% 
+  distinct() %>% 
+  ggplot(aes(x = Asian_percentage, y = total_count, color = asian_more_than_20))+
+  geom_boxplot(varwidth = TRUE,outlier.alpha = 0)+
+  geom_text(aes(label = label), size = 2.5, vjust = 0.3, hjust = -0.1, check_overlap = TRUE)+
+  labs(title = "Asian percentage", x = "", y = "") +
+  geom_point()+
+  scale_color_manual(values = c("#5F9659","orange"))+
+  theme_classic()+
+  theme(plot.title = element_text(size = 10,hjust = 0.5,color = "#414141"),
+        legend.position = "none")
+
+theft_young <- theftdata %>% 
+  mutate(college_age_more_15 = factor(if_else(`18-24 years - Share` > 15, "Yes",'No'))) %>%
+  group_by(Neighborhood) %>% 
+  summarise(total_count = sum(count_per_10000_people), `18-24 years - Share`, college_age_more_15,label) %>% 
+  distinct() %>% 
+  mutate(union = ifelse(label == "Union Park", "Union Park", " "),
+         label = ifelse(label == "Union Park", " ", label)) %>% 
+  ggplot(aes(x = `18-24 years - Share`, y = total_count, color = college_age_more_15))+
+  labs(title = "Age 18-24 percentage", x = "", y = "") +
+  geom_point()+
+  geom_text(aes(label = label), size = 2.5, vjust = 1.5, hjust = 0.5, check_overlap = TRUE)+
+  geom_text(aes(label = union), size = 2.5, vjust = 0.3, hjust = 1.1, check_overlap = TRUE)+
+  geom_boxplot(varwidth = TRUE,outlier.alpha = 0)+
+  #geom_smooth(method = 'lm') +
+  scale_color_manual(values = c("orange","#5F9659"))+
+  theme_classic()+
+  theme(plot.title = element_text(size = 10,hjust = 1,color = "#414141"),
+        legend.position = "none")
+```
+
+```{r,fig.width=4,fig.height=1.5}
+
+
+doubles <- ggarrange(theft_White,theft_asian,theft_Black,theft_young, nrow = 1)
+
+annotate_figure(doubles, left = textGrob("Crime Count per 10000 people", rot = 90, vjust = 1, gp = gpar(cex = 0.8)))
+```
+
+```{r}
+theftdata %>% 
+  mutate(Asian_percentage = as.numeric(str_remove(`Asian or Pacific Islander - Share`, "%"))) %>%
+  mutate(asian_more_than_20 = factor(if_else(Asian_percentage > 20, "Yes",'No'))) %>%
+  group_by(Neighborhood) %>% 
+  summarise(total_count = sum(count_per_10000_people), Asian_percentage, asian_more_than_20) %>% 
+  distinct() %>% 
+  ggplot(aes(x = Asian_percentage, y = total_count, color = asian_more_than_20))+
+  geom_boxplot(varwidth = TRUE,outlier.alpha = 0)+
+  geom_text(aes(label = Neighborhood), size = 2.5, vjust = 1)+
+  labs(title = "Theft Crime", y = "Crime Count per 1000 people in 2019") +
+  geom_point()+
+  theme_classic()
+```
+
+```{r}
+theftdata %>% 
+  mutate(BA_percentage = `Owner-occupied - Share`) %>% 
+  group_by(Neighborhood) %>% 
+  summarise(total_count = sum(count_per_10000_people), BA_percentage) %>% 
+  distinct() %>% 
+  ggplot(aes(x = BA_percentage, y = total_count))+
+  geom_point(color = "#414141")+
+  geom_smooth(method = 'lm',se = FALSE)
+```
+
+```{r}
+theftdata %>% 
+  mutate(BA_percentage = `Median rent (2008-2012, 2012 dollars)`) %>% 
+  group_by(Neighborhood) %>% 
+  summarise(total_count = sum(count_per_10000_people), BA_percentage) %>% 
+  distinct() %>% 
+  ggplot(aes(x = BA_percentage, y = total_count))+
+  geom_point(color = "#414141")+
+  geom_smooth(method = 'lm',se = FALSE)
+```
+
+
+
+
