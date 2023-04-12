@@ -1,6 +1,6 @@
 ---
 title: "Final Write Up"
-author: "Jason Shi, Rita Li & Jiashu Liu"
+author: "Jiashu Liu, Jason Shi & Rita Li "
 date: '2022-05-04'
 output:
  html_document:
@@ -189,7 +189,7 @@ mapdata %>%
         legend.justification = c(0.5,0.8))
 ```
 
-<img src="Final-Writeup_files/figure-html/violence map-1.png" title="This is a choropleth map colored by the violence crime count per capita in Saint Paul neighborhoods." alt="This is a choropleth map colored by the violence crime count per capita in Saint Paul neighborhoods."  />
+<img src="Final-Writeup_files/figure-html/violence map-1.png" alt="This is a choropleth map colored by the violence crime count per capita in Saint Paul neighborhoods."  />
 
 
 ### Violence Variables Visualizations
@@ -503,7 +503,7 @@ theftdata %>%
         legend.justification = c(0.5,0.8))
 ```
 
-<img src="Final-Writeup_files/figure-html/theft map-1.png" title="This is a choropleth map colored by the theft crime count per capita in Saint Paul neighborhoods." alt="This is a choropleth map colored by the theft crime count per capita in Saint Paul neighborhoods."  />
+<img src="Final-Writeup_files/figure-html/theft map-1.png" alt="This is a choropleth map colored by the theft crime count per capita in Saint Paul neighborhoods."  />
 
 
 ### Theft Variables Visualization
