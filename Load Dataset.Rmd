@@ -1,6 +1,6 @@
 ---
 title: "Load Dataset"
-author: "Rita Li"
+author: "Jiashu Liu & Rita Li"
 date: "4/12/2022"
 output: html_document
 ---
@@ -30,7 +30,13 @@ library(rpart.plot)
 library(stringr)
 #install.packages('sf')
 library(spdep) #install.packages('spdep')
-
+library(rsample)#vfold_cv
+library(parsnip)
+library(recipes)
+library(workflows)
+library(dials)
+library(tune)
+library(yardstick)
 ```
 
 ## Load data
@@ -90,10 +96,6 @@ violencedata <- crimedataset %>%
   mutate(values = as.numeric(str_remove(values, "%"))) %>% 
   pivot_wider(names_from = variables, values_from = values)
 ```
-
-
-
-
 
 # Create 10 CV folds
 ```{r}
@@ -263,11 +265,6 @@ var_imp_data2 <- tibble(
 
 var_imp_data2 %>% arrange(desc(var_imp2))
 ```
-
-
-
-
-
 ## GEE Modeling
 
 ### Violence
@@ -381,11 +378,6 @@ mor %>%
   geom_point()+
   geom_line()
 ```
-
-
-
-
-
 
 
 ### theft
