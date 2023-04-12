@@ -1,6 +1,6 @@
 ---
 title: "Visualization"
-author: "Rita Li"
+author: "Jiashu Liu & Rita Li"
 date: "4/27/2022"
 output: html_document
 ---
@@ -12,7 +12,13 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 library(ggpubr)
-
+library(readr)
+library(tidyverse)
+library(ggplot2)
+library(lubridate)
+library(geojsonsf)
+library(dplyr)
+library(sf)
 require(grid)
 crime <- read_csv("Crime_Incident_Report.csv")
 
@@ -92,7 +98,7 @@ violence <- violencedata %>%
   distinct() %>% 
   left_join(map, by = c("Neighborhood"="name2")) 
 
-write.csv2(violence, file = "Map.csv")
+#write.csv2(violence, file = "Map.csv")
 
 violence %>% 
   ggplot()+
